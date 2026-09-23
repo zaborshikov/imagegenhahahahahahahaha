@@ -1,0 +1,18 @@
+fastapi>=0.116,<1
+uvicorn[standard]>=0.35,<1
+python-multipart>=0.0.20
+pydantic>=2.11,<3
+pydantic-settings>=2.10,<3
+Pillow>=11.3,<12
+numpy>=2.2,<3
+# GPU inference. In Colab, the CUDA PyTorch build is usually already present.
+torch>=2.7
+transformers>=4.55
+accelerate>=1.10
+# FLUX.2 klein support moves quickly; BFL's model card currently recommends Diffusers main.
+diffusers>=0.40.0
+safetensors>=0.6
+huggingface-hub>=0.34
+# tests / smoke checks
+pytest>=8,<10
+httpx>=0.27,<1

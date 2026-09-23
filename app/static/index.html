@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Iterative Image Editor</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div>
+        <div class="brand">ITERATIVE / IMAGE</div>
+        <div class="sub">open-weight conversational image editor</div>
+      </div>
+      <div class="top-actions">
+        <span id="serverState" class="status-pill waiting">connecting…</span>
+        <button id="newBtn" class="ghost">New</button>
+        <label class="file-button">Open photo<input id="imageUpload" type="file" accept="image/png,image/jpeg,image/webp,image/bmp" hidden></label>
+        <button id="beforeBtn" class="ghost" disabled>Hold: before</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="editor-panel">
+        <div id="dropZone" class="stage-wrap empty-clickable">
+          <div id="emptyState" class="empty-state">
+            <div class="empty-mark">+</div>
+            <h2>Начать изображение</h2>
+            <p>Перетащи фото сюда или нажми, чтобы выбрать файл.</p>
+            <div class="or"><span>или</span></div>
+            <button id="startGenerateBtn" class="start-generate" type="button">Создать с нуля по описанию →</button>
+          </div>
+          <div id="stage" class="stage hidden">
+            <canvas id="imageCanvas"></canvas>
+            <canvas id="sketchCanvas"></canvas>
+            <canvas id="maskCanvas"></canvas>
+            <div id="busy" class="busy hidden"><div class="spinner"></div><span id="busyText">Generating…</span></div>
+          </div>
+        </div>
+
+        <div id="toolbar" class="toolbar disabled-toolbar">
+          <div class="tool-group">
+            <button class="tool active" data-tool="mask">Mask</button>
+            <button class="tool" data-tool="sketch">Sketch</button>
+            <button class="tool" data-tool="erase">Eraser</button>
+          </div>
+          <div class="tool-group brush-group">
+            <label>Brush <input id="brushSize" type="range" min="4" max="180" value="48"></label>
+            <input id="sketchColor" type="color" value="#ff365d" title="Sketch color">
+          </div>
+          <div class="tool-group">
+            <button id="clearMask" class="ghost">Clear mask</button>
+            <button id="clearSketch" class="ghost">Clear sketch</button>
+          </div>
+        </div>
+      </section>
+
+      <aside class="chat-panel">
+        <div class="mode-tabs">
+          <button id="editTab" class="mode-tab active" data-workflow="edit">Редактировать</button>
+          <button id="createTab" class="mode-tab" data-workflow="create">Создать с нуля</button>
+        </div>
+
+        <div id="editSettings">
+          <div class="settings-row">
+            <label>Editor model
+              <select id="provider">
+                <option value="qwen" selected>Qwen Image Edit 2511</option>
+                <option value="flux">FLUX.2 klein 4B</option>
+              </select>
+            </label>
+            <label>Edit mode
+              <select id="editMode">
+                <option value="auto" selected>Auto</option>
+                <option value="local">Local</option>
+                <option value="global">Global</option>
+              </select>
+            </label>
+          </div>
+          <label class="check"><input id="strictLocal" type="checkbox" checked> Strict local — вне маски исходные пиксели сохраняются</label>
+        </div>
+
+        <div id="createSettings" class="create-settings hidden">
+          <div class="settings-row create-grid">
+            <label>Generation model
+              <select id="generateProvider" disabled><option value="flux">FLUX.2 klein 4B</option></select>
+            </label>
+            <label>Aspect ratio
+              <select id="aspectRatio">
+                <option value="1:1" selected>1:1</option>
+                <option value="4:3">4:3</option>
+                <option value="3:4">3:4</option>
+                <option value="16:9">16:9</option>
+                <option value="9:16">9:16</option>
+              </select>
+            </label>
+            <label>Size
+              <select id="generationSize">
+                <option value="512" selected>512</option>
+                <option value="768">768</option>
+                <option value="1024">1024</option>
+                <option value="1280">1280</option>
+              </select>
+            </label>
+          </div>
+          <div class="create-note">После генерации изображение автоматически станет текущим и его можно сразу дорабатывать в режиме «Редактировать».</div>
+        </div>
+
+        <div id="chat" class="chat">
+          <div class="message system">Сервис готовит сессию. Можно загрузить фото или перейти в «Создать с нуля».</div>
+        </div>
+
+        <div class="composer">
+          <textarea id="prompt" rows="4" placeholder="Опиши изменение или новую картинку…"></textarea>
+          <div class="composer-meta">
+            <label id="referencesButton" class="ref-button">+ References <input id="references" type="file" accept="image/*" multiple hidden></label>
+            <span id="refCount">0 refs</span>
+            <label class="seed-label">seed <input id="seed" type="number" placeholder="random"></label>
+          </div>
+          <div class="composer-actions single-action">
+            <button id="primaryAction" class="primary">Apply edit</button>
+          </div>
+          <div id="hint" class="hint">Для локального изменения нарисуй белую маску. Sketch — отдельный слой подсказки формы/положения.</div>
+        </div>
+      </aside>
+    </main>
+  </div>
+  <script src="/static/app.js?v=2"></script>
+</body>
+</html>
