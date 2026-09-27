@@ -15,7 +15,7 @@ from .image_ops import (
     normalize_mask,
     restore_size,
 )
-from .providers.base import EditInput
+from .providers.base import EditInput, RunOptions
 from .providers.manager import provider_manager
 
 
@@ -25,6 +25,8 @@ class EditResult:
     provider: str
     mode: str
     seed: int
+    steps: int | None = None
+    save_gpu: str | None = None
 
 
 def history_context(messages: list[dict[str, str]], latest: str) -> str:
@@ -52,8 +54,10 @@ def run_edit(
     sketch: Image.Image | None = None,
     references: list[Image.Image] | None = None,
     seed: int | None = None,
+    options: RunOptions | None = None,
 ) -> EditResult:
     references = references or []
+    options = options or RunOptions(save_gpu=settings.default_save_gpu)
     seed = seed if seed is not None else random.randint(0, 2**31 - 1)
     base = base.convert("RGB")
     mask = normalize_mask(mask, base.size) if mask is not None else None
@@ -72,9 +76,9 @@ def run_edit(
             if sketch_ref is not None:
                 sketch_ref = sketch_ref.resize(model_img.size, Image.Resampling.LANCZOS)
             refs = [r.convert("RGB") for r in references[:3]]
-            out = provider.edit(EditInput(model_img, prompt, refs, sketch_ref, seed))
+            out = provider.edit(EditInput(model_img, prompt, refs, sketch_ref, seed, options))
             out = restore_size(out, original_size)
-            return EditResult(out, provider_name, mode, seed)
+            return EditResult(out, provider_name, mode, seed, _steps(provider, options), options.save_gpu)
 
         box = bbox_from_mask(mask)
         assert box is not None
@@ -94,18 +98,32 @@ def run_edit(
             + prompt
         )
         refs = [r.convert("RGB") for r in references[:3]]
-        edited = provider.edit(EditInput(crop_model, local_prompt, refs, sketch_ref, seed))
+        edited = provider.edit(EditInput(crop_model, local_prompt, refs, sketch_ref, seed, options))
         edited = restore_size(edited, crop_original_size)
 
         # Even if the generative model changes the whole crop, strict compositing makes the visible change local.
         feather = settings.mask_feather if strict_local else max(settings.mask_feather, 18)
         out = composite_local(base, edited, mask, box, feather)
-        return EditResult(out, provider_name, mode, seed)
+        return EditResult(out, provider_name, mode, seed, _steps(provider, options), options.save_gpu)
 
 
-def run_generate(prompt: str, width: int, height: int, seed: int | None) -> EditResult:
+def _steps(provider, options: RunOptions) -> int | None:
+    resolve = getattr(provider, "resolve_steps", None)
+    return resolve(options.steps) if resolve else options.steps
+
+
+def run_generate(
+    prompt: str,
+    width: int,
+    height: int,
+    seed: int | None,
+    provider_name: str | None = None,
+    options: RunOptions | None = None,
+) -> EditResult:
+    provider_name = provider_manager.validate(provider_name or settings.default_generate_provider, for_generate=True)
+    options = options or RunOptions(save_gpu=settings.default_save_gpu)
     seed = seed if seed is not None else random.randint(0, 2**31 - 1)
     with provider_manager.gpu_lock:
-        provider = provider_manager.get("flux")
-        image = provider.generate(prompt, width, height, seed)
-    return EditResult(image, "flux", "generate", seed)
+        provider = provider_manager.get(provider_name)
+        image = provider.generate(prompt, width, height, seed, options)
+    return EditResult(image, provider_name, "generate", seed, _steps(provider, options), options.save_gpu)

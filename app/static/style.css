@@ -98,3 +98,9 @@ textarea:focus { border-color: #505766; }
   .top-actions { flex-wrap: wrap; justify-content: flex-end; }
   .create-grid { grid-template-columns: 1fr 1fr; }
 }
+
+.inference-settings { padding: 0 14px 12px; display: grid; grid-template-columns: 1.6fr 1fr; gap: 10px; border-bottom: 1px solid var(--line); }
+.inference-settings label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+.inference-settings select { width: 100%; }
+.steps-label input[type="range"] { width: 100%; margin-top: 8px; accent-color: var(--accent, #7aa2ff); }
+.steps-value { color: var(--text); font-weight: 600; margin-left: 4px; }
