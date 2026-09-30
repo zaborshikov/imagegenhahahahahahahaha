@@ -15,7 +15,10 @@ from PIL import Image, ImageOps
 from .config import settings
 from .editor import run_edit, run_generate
 from .image_ops import normalize_rgb, save_png
-from .schemas import AssetResponse, GenerateRequest, JobResponse, JobState, SessionCreateResponse
+from .providers.base import RunOptions
+from .providers.loading import bitsandbytes_status, effective_quantization
+from .providers.manager import provider_manager
+from .schemas import AssetResponse, GenerateRequest, JobResponse, JobState, SaveGpuMode, SessionCreateResponse
 from .session import sessions
 from .runtime import cuda_info
 
@@ -55,14 +58,45 @@ def index():
 
 @app.get("/api/health")
 def health():
+    bnb_available, bnb_reason = bitsandbytes_status()
+    providers = provider_manager.describe()
     return {
         "ok": True,
         "cuda_expected": True,
         "default_provider": settings.default_provider,
-        "qwen_model": settings.qwen_model_id,
-        "flux_model": settings.flux_model_id,
+        "default_generate_provider": settings.default_generate_provider,
+        "default_save_gpu": settings.default_save_gpu,
+        "save_gpu_modes": [m.value for m in SaveGpuMode],
         "gpu": cuda_info(),
-        "capabilities": {"upload": True, "generate": ["flux"], "edit": ["qwen", "flux"]},
+        "providers": [
+            {
+                "name": p.name,
+                "label": p.label,
+                "model_id": p.model_id,
+                "license": p.license,
+                "supports_edit": p.supports_edit,
+                "supports_generate": p.supports_generate,
+                "steps": {"default": p.default_steps, "min": p.min_steps, "max": p.max_steps},
+                "quantization": {
+                    "requested": p.quantization,
+                    "effective": effective_quantization(p.quantization),
+                },
+            }
+            for p in providers
+        ],
+        "quantization": {
+            "bitsandbytes_available": bnb_available,
+            "bitsandbytes_error": bnb_reason,
+            **{
+                p.name: {"requested": p.quantization, "effective": effective_quantization(p.quantization)}
+                for p in providers
+            },
+        },
+        "capabilities": {
+            "upload": True,
+            "generate": provider_manager.generate_providers,
+            "edit": provider_manager.edit_providers,
+        },
     }
 
 
@@ -110,6 +144,14 @@ def update_job(job_id: str, **values):
         jobs.setdefault(job_id, {}).update(values)
 
 
+def run_options(job_id: str, steps: int | None, save_gpu: str | None) -> RunOptions:
+    return RunOptions(
+        steps=steps,
+        save_gpu=save_gpu or settings.default_save_gpu,
+        progress=lambda stage: update_job(job_id, stage=stage),
+    )
+
+
 def edit_worker(job_id: str, sid: str, payload: dict):
     try:
         state = sessions.get(sid)
@@ -135,20 +177,27 @@ def edit_worker(job_id: str, sid: str, payload: dict):
             sketch=sketch,
             references=refs,
             seed=payload.get("seed"),
+            options=run_options(job_id, payload.get("steps"), payload.get("save_gpu")),
         )
         state.revision += 1
         out_path = state.root / f"edit_{state.revision:04d}.png"
         save_png(result.image, out_path)
         state.current_image = out_path
-        state.append("assistant", f"Applied {result.mode} edit with {result.provider}; seed={result.seed}.")
+        label = provider_manager.info(result.provider).label
+        state.append(
+            "assistant", f"Applied {result.mode} edit with {label}; steps={result.steps}, seed={result.seed}."
+        )
         state.persist_history()
         update_job(
             job_id,
             status="done",
+            stage="Done",
             image_url=media_url(out_path),
             provider=result.provider,
             mode=result.mode,
             seed=result.seed,
+            steps=result.steps,
+            save_gpu=result.save_gpu,
         )
     except Exception as exc:
         log.exception("Edit failed")
@@ -163,14 +212,15 @@ def create_edit(
     mode: str = Form("auto"),
     strict_local: bool = Form(True),
     seed: int | None = Form(None),
+    steps: int | None = Form(None, ge=1, le=200),
+    save_gpu: SaveGpuMode | None = Form(None),
     mask: UploadFile | None = File(None),
     sketch: UploadFile | None = File(None),
     references: list[UploadFile] | None = File(None),
 ):
     try:
         sessions.get(sid)
-        if provider not in {"qwen", "flux"}:
-            raise ValueError("provider must be qwen or flux")
+        provider_manager.validate(provider)
         if mode not in {"auto", "local", "global"}:
             raise ValueError("mode must be auto, local, or global")
         payload = {
@@ -179,6 +229,8 @@ def create_edit(
             "mode": mode,
             "strict_local": strict_local,
             "seed": seed,
+            "steps": steps,
+            "save_gpu": save_gpu.value if save_gpu else None,
             "mask": read_upload(mask),
             "sketch": read_upload(sketch),
             "references": [read_upload(x) for x in (references or [])][:3],
@@ -200,14 +252,32 @@ def generate_worker(job_id: str, sid: str, req: GenerateRequest):
         state = sessions.get(sid)
         update_job(job_id, status="running")
         state.append("user", req.prompt)
-        result = run_generate(req.prompt, req.width, req.height, req.seed)
+        result = run_generate(
+            req.prompt,
+            req.width,
+            req.height,
+            req.seed,
+            req.provider,
+            options=run_options(job_id, req.steps, req.save_gpu.value if req.save_gpu else None),
+        )
         state.revision += 1
         out_path = state.root / f"generated_{state.revision:04d}.png"
         save_png(result.image, out_path)
         state.current_image = out_path
-        state.append("assistant", f"Generated image with FLUX.2 [klein] 4B; seed={result.seed}.")
+        label = provider_manager.info(result.provider).label
+        state.append("assistant", f"Generated image with {label}; steps={result.steps}, seed={result.seed}.")
         state.persist_history()
-        update_job(job_id, status="done", image_url=media_url(out_path), provider="flux", mode="generate", seed=result.seed)
+        update_job(
+            job_id,
+            status="done",
+            stage="Done",
+            image_url=media_url(out_path),
+            provider=result.provider,
+            mode="generate",
+            seed=result.seed,
+            steps=result.steps,
+            save_gpu=result.save_gpu,
+        )
     except Exception as exc:
         log.exception("Generation failed")
         update_job(job_id, status="error", error=f"{type(exc).__name__}: {exc}")
@@ -217,8 +287,11 @@ def generate_worker(job_id: str, sid: str, req: GenerateRequest):
 def create_generation(sid: str, req: GenerateRequest):
     try:
         sessions.get(sid)
+        provider_manager.validate(req.provider or settings.default_generate_provider, for_generate=True)
     except KeyError:
         raise HTTPException(404, "Unknown session")
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
     job_id = uuid.uuid4().hex
     update_job(job_id, status="queued")
     executor.submit(generate_worker, job_id, sid, req)

@@ -53,4 +53,6 @@ Open the printed `https://....trycloudflare.com` URL.
 
 ## T4 note
 
-The app detects the GPU. T4 uses `float16`; Ampere/Ada/Hopper GPUs use `bfloat16`. Start with FLUX.2 klein 4B. Qwen-Image-Edit-2511 is much heavier and its first load can exceed a small Colab runtime's CPU/GPU memory even with 4-bit quantization/offload.
+The app detects the GPU. T4 uses `float16`; Ampere/Ada/Hopper GPUs use `bfloat16`. Start with FLUX.2 klein 4B (~4 GB in fp8).
+
+Qwen-Image-2.1 is ~16 GB of fp8 weights, which does not fit a 16 GB T4 next to activations. `.env.colab` therefore sets `DEFAULT_SAVE_GPU=disk`: the text encoder (8 GB fp8) and the transformer + VAE (~8 GB fp8) are never on the GPU at the same time, so peak VRAM is ~10.5 GB at 1024×1024. `disk` rather than `ram` because the free Colab runtime has only ~12 GB of CPU RAM, not enough to park the whole pipeline there. Every request re-reads the weights from disk. You can switch to `off`/`ram` per request in the UI when running on a bigger GPU (A100/L4). See the GPU memory table in `README.md`.

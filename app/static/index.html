@@ -66,7 +66,7 @@
           <div class="settings-row">
             <label>Editor model
               <select id="provider">
-                <option value="qwen" selected>Qwen Image Edit 2511</option>
+                <option value="qwen21" selected>Qwen Image 2.1</option>
                 <option value="flux">FLUX.2 klein 4B</option>
               </select>
             </label>
@@ -84,7 +84,10 @@
         <div id="createSettings" class="create-settings hidden">
           <div class="settings-row create-grid">
             <label>Generation model
-              <select id="generateProvider" disabled><option value="flux">FLUX.2 klein 4B</option></select>
+              <select id="generateProvider">
+                <option value="qwen21" selected>Qwen Image 2.1</option>
+                <option value="flux">FLUX.2 klein 4B</option>
+              </select>
             </label>
             <label>Aspect ratio
               <select id="aspectRatio">
@@ -105,6 +108,19 @@
             </label>
           </div>
           <div class="create-note">После генерации изображение автоматически станет текущим и его можно сразу дорабатывать в режиме «Редактировать».</div>
+        </div>
+
+        <div id="inferenceSettings" class="inference-settings">
+          <label class="steps-label">Steps <span id="stepsValue" class="steps-value">40</span>
+            <input id="steps" type="range" min="4" max="60" step="1" value="40">
+          </label>
+          <label>Save GPU
+            <select id="saveGpu" title="off — всё на GPU (быстро); ram — компоненты по очереди GPU↔RAM; disk — текстовый энкодер и трансформер никогда не в памяти одновременно (минимум VRAM, медленно)">
+              <option value="off" selected>off</option>
+              <option value="ram">ram</option>
+              <option value="disk">disk</option>
+            </select>
+          </label>
         </div>
 
         <div id="chat" class="chat">

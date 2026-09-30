@@ -15,13 +15,7 @@ Open http://127.0.0.1:8000.
 
 Start with **FLUX** and 512px. FLUX.2 klein uses 4 inference steps but CPU generation is still slow.
 
-## Experimental Qwen CPU mode
-Qwen-Image-Edit-2511 is much larger. Install current bitsandbytes CPU support:
+## Experimental Qwen-Image-2.1 CPU mode
+Qwen-Image-2.1 is ~16 GB with `QWEN21_QUANTIZATION=fp8` (the default in `.env.windows_cpu`), so it fits in 32 GB RAM, but CPU inference of a 7B DiT at 20+ steps takes many minutes per image. Do not use `QWEN21_QUANTIZATION=none` (~31 GB) on a 32 GB machine.
 
-```bat
-pip install -r requirements-cpu-qwen.txt
-```
-
-Keep `QWEN_QUANTIZATION=nf4`. Do not use `QWEN_QUANTIZATION=none` on a 32 GB machine.
-
-If Qwen quantized CPU loading fails on your specific PyTorch/Python build, use FLUX locally and Qwen on Colab GPU; the UI/backend remains the same.
+If it is too slow, use FLUX locally and Qwen-Image-2.1 on a Colab GPU; the UI/backend remains the same.

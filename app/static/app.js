@@ -11,6 +11,8 @@ let lastPoint = null;
 let refs = [];
 let workflow = "edit";
 let busy = false;
+// provider name -> {default, min, max}; filled from /api/health
+let stepRanges = {};
 
 const imageCanvas = $("imageCanvas");
 const maskCanvas = $("maskCanvas");
@@ -64,9 +66,7 @@ async function init() {
     const r = await fetch("/api/health", { cache: "no-store" });
     if (r.ok) {
       const health = await r.json();
-      if (health.default_provider && $("provider").querySelector(`option[value="${health.default_provider}"]`)) {
-        $("provider").value = health.default_provider;
-      }
+      populateProviders(health);
       const gpu = health.gpu || {};
       if (gpu.available) {
         addMessage("system", `GPU: ${gpu.name} · ${gpu.total_vram_gb} GB · ${gpu.preferred_dtype}. Загрузите фото или создайте изображение с нуля.`);
@@ -77,6 +77,66 @@ async function init() {
   } catch (e) {
     addMessage("error", `Не удалось создать сессию: ${e.message}`);
   }
+}
+
+function fillSelect(select, providers, defaultName) {
+  if (!providers.length) return;
+  select.innerHTML = "";
+  for (const p of providers) {
+    const opt = document.createElement("option");
+    opt.value = p.name;
+    opt.textContent = p.label;
+    select.appendChild(opt);
+  }
+  if (defaultName && select.querySelector(`option[value="${defaultName}"]`)) {
+    select.value = defaultName;
+  }
+}
+
+// The selects have static fallbacks in index.html; the server is the source of truth.
+function populateProviders(health) {
+  const providers = health.providers || [];
+  stepRanges = {};
+  for (const p of providers) if (p.steps) stepRanges[p.name] = p.steps;
+  fillSelect($("provider"), providers.filter((p) => p.supports_edit), health.default_provider);
+  fillSelect($("generateProvider"), providers.filter((p) => p.supports_generate), health.default_generate_provider);
+  if (health.save_gpu_modes) {
+    const sel = $("saveGpu");
+    sel.innerHTML = "";
+    for (const m of health.save_gpu_modes) {
+      const opt = document.createElement("option");
+      opt.value = m;
+      opt.textContent = m;
+      sel.appendChild(opt);
+    }
+    sel.value = health.default_save_gpu || "off";
+  }
+  syncStepsToProvider();
+  updatePrimaryAction();
+}
+
+function providerLabel(select) {
+  const opt = select.selectedOptions[0];
+  return opt ? opt.textContent : select.value;
+}
+
+function activeProviderSelect() {
+  return workflow === "create" ? $("generateProvider") : $("provider");
+}
+
+// The steps slider follows the model that will actually run: each model has its own sane range.
+function syncStepsToProvider() {
+  const range = stepRanges[activeProviderSelect().value];
+  if (!range) return;
+  const slider = $("steps");
+  slider.min = range.min;
+  slider.max = range.max;
+  slider.value = range.default;
+  $("stepsValue").textContent = slider.value;
+}
+
+function inferenceOptions() {
+  return { steps: Number($("steps").value), save_gpu: $("saveGpu").value };
 }
 
 function addMessage(role, content) {
@@ -105,7 +165,7 @@ function updatePrimaryAction() {
   const btn = $("primaryAction");
   if (workflow === "create") {
     btn.textContent = busy ? "Generating…" : "Generate image";
-    $("hint").textContent = "FLUX.2 klein 4B создаёт изображение с нуля. После генерации можно сразу продолжить локальными или глобальными правками.";
+    $("hint").textContent = `${providerLabel($("generateProvider"))} создаёт изображение с нуля. После генерации можно сразу продолжить локальными или глобальными правками.`;
     $("referencesButton").classList.add("hidden");
     $("refCount").classList.add("hidden");
   } else {
@@ -120,6 +180,7 @@ function updatePrimaryAction() {
 }
 
 function setWorkflow(next) {
+  const changed = workflow !== next;
   workflow = next;
   $("editTab").classList.toggle("active", next === "edit");
   $("createTab").classList.toggle("active", next === "create");
@@ -129,6 +190,7 @@ function setWorkflow(next) {
     ? "Например: cinematic photo of a glass observatory on a snowy mountain at blue hour…"
     : "Например: добавь в выделенную область старое кожаное кресло, сохрани перспективу и освещение…";
   updatePrimaryAction();
+  if (changed) syncStepsToProvider();
   if (next === "create") $("prompt").focus();
 }
 
@@ -284,7 +346,9 @@ async function pollJob(jobId, actionName, onDone = null) {
     if (job.status === "done") {
       try {
         await loadImage(job.image_url, true);
-        addMessage("assistant", `${actionName} · ${job.provider} · ${job.mode} · seed ${job.seed}`);
+        const extra = [job.steps ? `${job.steps} steps` : null, job.save_gpu && job.save_gpu !== "off" ? `save-gpu ${job.save_gpu}` : null]
+          .filter(Boolean).join(" · ");
+        addMessage("assistant", `${actionName} · ${job.provider} · ${job.mode} · seed ${job.seed}${extra ? " · " + extra : ""}`);
         if (onDone) onDone(job);
       } catch (e) {
         addMessage("error", e.message);
@@ -297,7 +361,7 @@ async function pollJob(jobId, actionName, onDone = null) {
       setBusy(false);
       return;
     }
-    const label = job.status === "queued" ? "Queued on GPU…" : "Running model…";
+    const label = job.status === "queued" ? "Queued on GPU…" : (job.stage ? `${job.stage}…` : "Running model…");
     if (!$("stage").classList.contains("hidden")) $("busyText").textContent = label;
     setServerState("waiting", job.status === "queued" ? "queued" : "generating");
   }
@@ -327,6 +391,9 @@ async function applyEdit() {
     const fd = new FormData();
     fd.append("prompt", prompt);
     fd.append("provider", $("provider").value);
+    const opts = inferenceOptions();
+    fd.append("steps", String(opts.steps));
+    fd.append("save_gpu", opts.save_gpu);
     fd.append("mode", mode);
     fd.append("strict_local", $("strictLocal").checked ? "true" : "false");
     const seed = $("seed").value.trim();
@@ -371,12 +438,13 @@ async function generateNew() {
     const [width, height] = generationDimensions();
     const seedText = $("seed").value.trim();
     const seed = seedText ? Number(seedText) : null;
-    addMessage("user", `[Создать ${width}×${height}] ${prompt}`);
+    const provider = $("generateProvider").value;
+    addMessage("user", `[Создать ${width}×${height} · ${providerLabel($("generateProvider"))}] ${prompt}`);
     setBusy(true, "Queueing generation…");
     const r = await fetch(`/api/sessions/${sessionId}/generate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt, width, height, seed }),
+      body: JSON.stringify({ prompt, width, height, seed, provider, ...inferenceOptions() }),
     });
     if (!r.ok) throw new Error(await apiError(r));
     $("prompt").value = "";
@@ -429,6 +497,9 @@ function showBefore(on) {
 }
 
 $("imageUpload").addEventListener("change", (e) => uploadPhoto(e.target.files?.[0]));
+$("steps").addEventListener("input", () => { $("stepsValue").textContent = $("steps").value; });
+$("provider").addEventListener("change", syncStepsToProvider);
+$("generateProvider").addEventListener("change", () => { syncStepsToProvider(); updatePrimaryAction(); });
 $("primaryAction").addEventListener("click", () => workflow === "create" ? generateNew() : applyEdit());
 $("newBtn").addEventListener("click", resetSession);
 $("editTab").addEventListener("click", () => setWorkflow("edit"));

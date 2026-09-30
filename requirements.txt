@@ -5,14 +5,21 @@ pydantic>=2.11,<3
 pydantic-settings>=2.10,<3
 Pillow>=11.3,<12
 numpy>=2.2,<3
-# GPU inference. In Colab, the CUDA PyTorch build is usually already present.
+# GPU inference. Install the CUDA build matching your driver first, e.g.
+#   pip install torch --index-url https://download.pytorch.org/whl/cu128
+# fp8 weight storage needs torch>=2.1 (float8_e4m3fn); any recent CUDA build works.
 torch>=2.7
-transformers>=4.55
+# Qwen-Image-2.1's Qwen3-VL processor imports torchvision.
+torchvision>=0.22
+# Qwen-Image-2.1 needs the Qwen3-VL processor/encoder (transformers>=5.17).
+transformers>=5.17
 accelerate>=1.10
-# FLUX.2 klein support moves quickly; BFL's model card currently recommends Diffusers main.
-diffusers>=0.40.0
+# Qwen-Image-2.1 (QwenImage21Pipeline) and FLUX.2 klein are only in diffusers main until 0.41 ships.
+diffusers @ git+https://github.com/huggingface/diffusers
 safetensors>=0.6
 huggingface-hub>=0.34
+# Optional: only for *_QUANTIZATION = nf4 | int8. The default (fp8) does not need it.
+# bitsandbytes>=0.45
 # tests / smoke checks
 pytest>=8,<10
 httpx>=0.27,<1
